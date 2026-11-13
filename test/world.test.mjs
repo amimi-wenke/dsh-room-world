@@ -21,6 +21,26 @@ test('chat inherits adapter persona/memory/current room; desktop has no QQ send 
   await service.tool({ target: 'room', action: 'rice' }); assert.equal(service.commands(0).events.at(-1).action, 'rice');
   id = 'role-b'; await service.refresh(); assert.equal(service.history().messages.length, 0); assert.equal(service.room.room().online, false);
 });
+
+test('chat history is flattened into the system prompt; every request sends a single user message', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-chat-history-')); t.after(() => fs.rmSync(dir, { recursive: true }));
+  const seen = [];
+  const service = createService({ stateDir: dir, planner: { enabled: false },
+    adapter: { context: async () => ({ id: 'role-a', name: 'x', persona: 'p', memory: 'm' }) },
+    complete: async options => { seen.push(options); return JSON.stringify({ text: 'reply ' + seen.length, roomAction: null }); },
+  });
+  await service.refresh();
+  await service.chat('first', 'r1');
+  await service.chat('second', 'r2');
+  assert.equal(seen.length, 2);
+  for (const options of seen) {
+    assert.equal(options.messages.length, 1, 'history must not be replayed as chat turns');
+    assert.equal(options.messages[0].role, 'user');
+  }
+  assert.ok(!seen[0].system.includes('最近的桌面对话'), 'nothing to quote before the first reply');
+  assert.ok(seen[1].system.includes('最近的桌面对话'));
+  assert.ok(seen[1].system.includes('主人：first') && seen[1].system.includes('你：reply 1'));
+});
 test('character switching while LLM is pending cancels reply and actions', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-switch-')); t.after(() => fs.rmSync(dir, { recursive: true }));
   let id = 'a', resolve;
